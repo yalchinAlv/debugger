@@ -28,7 +28,6 @@ public class Debugger {
         LaunchingConnector launchingConnector = Bootstrap.virtualMachineManager().defaultConnector();
         Map<String, Connector.Argument> arguments = launchingConnector.defaultArguments();
         arguments.get("main").setValue(debuggee.getName());
-        System.out.println(arguments);
         virtualMachine = launchingConnector.launch(arguments);
 
         ClassPrepareRequest classPrepareRequest = virtualMachine.eventRequestManager().createClassPrepareRequest();

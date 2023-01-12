@@ -4,15 +4,13 @@ import com.sun.jdi.*;
 import com.sun.jdi.connect.IllegalConnectorArgumentsException;
 import com.sun.jdi.connect.VMStartException;
 import com.sun.jdi.event.*;
+import com.sun.jdi.request.BreakpointRequest;
 import com.sun.jdi.request.StepRequest;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.util.Arrays;
-import java.util.Map;
-import java.util.Scanner;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -26,7 +24,7 @@ public class Main {
         final Scanner scanner = new Scanner(System.in);
 
         final String debuggeeName = args[0];
-        System.out.println("Starting debugging " + debuggeeName);
+        System.out.println("Starting debugging " + debuggeeName + "\n");
         final Set<Integer> breakpoints = getInitialBreakpoints(scanner);
 
         final Debugger debugger = new Debugger(Class.forName(debuggeeName), breakpoints);
@@ -69,7 +67,7 @@ public class Main {
         StackFrame stackFrame = thread.frame(0);
         final Map<LocalVariable, Value> variables = stackFrame.getValues(stackFrame.visibleVariables());
 
-        System.out.println("Stopped at " + stackFrame.location());
+        System.out.println("\nStopped at " + stackFrame.location());
 
         while (true) {
             System.out.print("$> ");
@@ -82,34 +80,7 @@ public class Main {
 
             if (command.startsWith("print ")) {
                 final String variableName = command.substring(6);
-                Set<Map.Entry<LocalVariable, Value>> variable = variables.entrySet().stream()
-                        .filter(entry -> entry.getKey().name().equals(variableName))
-                        .collect(Collectors.toSet());
-
-                if (variable.isEmpty()) {
-                    System.out.println("No variable found with the name: " + variableName);
-                    continue;
-                }
-
-                for (final Map.Entry<LocalVariable, Value> entry : variable) {
-                    final LocalVariable key = entry.getKey();
-                    final Value value = entry.getValue();
-                    System.out.println(key.name() + ": " + value);
-
-                    if (value instanceof ArrayReference) {
-                        System.out.println("Content: ");
-                        System.out.println(((ArrayReference) value).getValues());
-                        continue;
-                    }
-
-                    if (value instanceof ObjectReference) {
-                        ObjectReference objectReference = (ObjectReference) value;
-                        Map<Field, Value> fields = objectReference.getValues(objectReference.referenceType().allFields());
-
-                        System.out.println("Fields: ");
-                        System.out.println(fields);
-                    }
-                }
+                printDetailed(variables, variableName);
 
                 continue;
             }
@@ -129,12 +100,90 @@ public class Main {
                 return;
             }
 
+            if (command.equals("breakpoints")) {
+                final List<Integer> breakpoints = getActiveBreakpoints(virtualMachine);
+
+                System.out.println("Enabled breakpoints (line numbers): " + breakpoints);
+                continue;
+            }
+
+            if (command.startsWith("breakpoint ")) {
+                int lineNumber = Integer.parseInt(command.substring(11));
+
+                if (lineNumber > 0) {
+                    addBreakpoint(virtualMachine, lineNumber);
+                }
+            }
+
             if (command.equals("continue")) {
                 return;
             }
 
             System.out.println("Invalid command");
         }
+    }
+
+    private static void addBreakpoint(VirtualMachine virtualMachine, int lineNumber) {
+        final List<Integer> breakpoints = getActiveBreakpoints(virtualMachine);
+        if (breakpoints.contains(lineNumber)) {
+            System.out.println("There is already an active breakpoint at line " + lineNumber);
+        }
+    }
+
+    private static List<Integer> getActiveBreakpoints(VirtualMachine virtualMachine) {
+        final List<Integer> breakpoints = virtualMachine.eventRequestManager().breakpointRequests()
+                .stream()
+                .filter(BreakpointRequest::isEnabled)
+                .map(BreakpointRequest::location)
+                .map(Location::lineNumber)
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
+        return breakpoints;
+    }
+
+    private static void printDetailed(Map<LocalVariable, Value> variables, String variableName) {
+        final Set<Map.Entry<LocalVariable, Value>> variable = variables.entrySet().stream()
+                .filter(entry -> entry.getKey().name().equals(variableName))
+                .collect(Collectors.toSet());
+
+        if (variable.isEmpty()) {
+            System.out.println("No variable found with the name: " + variableName);
+            return;
+        }
+
+        for (final Map.Entry<LocalVariable, Value> entry : variable) {
+            final LocalVariable key = entry.getKey();
+            final Value value = entry.getValue();
+            System.out.println(key.name() + ": " + value);
+            if (value instanceof ObjectReference) {
+                System.out.print(prettify(value));
+            }
+        }
+    }
+
+    private static String prettify(Value value) {
+        String prettyString;
+        if (value instanceof ArrayReference) {
+            prettyString = "Content: [";
+            prettyString += ((ArrayReference) value).getValues().stream()
+                    .map(Main::prettify)
+                    .collect(Collectors.joining(", ")) + "]\n";
+            return prettyString;
+        }
+
+        if (value instanceof ObjectReference) {
+            ObjectReference objectReference = (ObjectReference) value;
+            Map<Field, Value> fields = objectReference.getValues(objectReference.referenceType().allFields());
+
+            prettyString = "Fields: ";
+            prettyString += fields.entrySet().stream()
+                    .collect(Collectors.toMap(Map.Entry::getKey, entry -> prettify(entry.getValue()))) + "\n";
+
+            return prettyString;
+        }
+
+        return value.toString();
     }
 
     private static Set<Integer> getInitialBreakpoints(final Scanner scanner) {
