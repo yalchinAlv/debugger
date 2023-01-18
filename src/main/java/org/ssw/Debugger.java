@@ -9,6 +9,7 @@ import com.sun.jdi.event.ClassPrepareEvent;
 import com.sun.jdi.request.ClassPrepareRequest;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -18,6 +19,7 @@ public class Debugger {
     private final Class<?> debuggee;
     private final Set<Integer> breakpoints;
     private VirtualMachine virtualMachine;
+    private ClassType classType;
 
     public Debugger(final Class<?> debuggee, final Set<Integer> breakpoints) {
         this.debuggee = requireNonNull(debuggee);
@@ -38,10 +40,19 @@ public class Debugger {
     }
 
     public void handleClassPrepareEvent(final ClassPrepareEvent classPrepareEvent) throws AbsentInformationException {
-        ClassType classType = (ClassType) classPrepareEvent.referenceType();
+        classType = (ClassType) classPrepareEvent.referenceType();
         for (int lineNumber : breakpoints) {
-            Location location = classType.locationsOfLine(lineNumber).get(0);
-            virtualMachine.eventRequestManager().createBreakpointRequest(location).enable();
+            addBreakpoint(lineNumber);
         }
+    }
+
+    public void addBreakpoint(int lineNumber) throws AbsentInformationException {
+        List<Location> locations = classType.locationsOfLine(lineNumber);
+        if (locations.isEmpty()) {
+            System.out.println("No code location found at line " + lineNumber);
+            return;
+        }
+
+        virtualMachine.eventRequestManager().createBreakpointRequest(locations.get(0)).enable();
     }
 }

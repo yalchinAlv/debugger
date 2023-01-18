@@ -50,7 +50,7 @@ public class Main {
                     }
 
                     if (event instanceof StepEvent || event instanceof BreakpointEvent) {
-                        handleStepAndBreakpointEvents(scanner, virtualMachine, event);
+                        handleStepAndBreakpointEvents(scanner, virtualMachine, event, debugger);
                     }
                 }
 
@@ -61,7 +61,7 @@ public class Main {
         }
     }
 
-    private static void handleStepAndBreakpointEvents(final Scanner scanner, final VirtualMachine virtualMachine, final Event event) throws IncompatibleThreadStateException, AbsentInformationException {
+    private static void handleStepAndBreakpointEvents(final Scanner scanner, final VirtualMachine virtualMachine, final Event event, Debugger debugger) throws IncompatibleThreadStateException, AbsentInformationException {
         event.request().disable();
         ThreadReference thread = ((LocatableEvent) event).thread();
         StackFrame stackFrame = thread.frame(0);
@@ -107,12 +107,26 @@ public class Main {
                 continue;
             }
 
-            if (command.startsWith("breakpoint ")) {
-                int lineNumber = Integer.parseInt(command.substring(11));
+            if (command.startsWith("breakpoints ")) {
+                int lineNumber = Integer.parseInt(command.substring(12));
 
                 if (lineNumber > 0) {
-                    addBreakpoint(virtualMachine, lineNumber);
+                    addBreakpoint(virtualMachine, lineNumber, debugger);
+                    continue;
                 }
+
+                if (lineNumber < 0) {
+                    removeBreakpoint(virtualMachine, -lineNumber);
+                    continue;
+                }
+
+                System.out.println("Breakpoint line number cannot be 0");
+                continue;
+            }
+
+            if (command.equals("trace")) {
+                System.out.println(thread.frames());
+                continue;
             }
 
             if (command.equals("continue")) {
@@ -123,15 +137,33 @@ public class Main {
         }
     }
 
-    private static void addBreakpoint(VirtualMachine virtualMachine, int lineNumber) {
+    private static void addBreakpoint(VirtualMachine virtualMachine, int lineNumber, Debugger debugger) throws AbsentInformationException {
         final List<Integer> breakpoints = getActiveBreakpoints(virtualMachine);
         if (breakpoints.contains(lineNumber)) {
             System.out.println("There is already an active breakpoint at line " + lineNumber);
+            return;
         }
+
+        debugger.addBreakpoint(lineNumber);
+        System.out.println("Added a breakpoint at line " + lineNumber);
+    }
+
+    private static void removeBreakpoint(VirtualMachine virtualMachine, int lineNumber) {
+        final List<Integer> breakpoints = getActiveBreakpoints(virtualMachine);
+        if (!breakpoints.contains(lineNumber)) {
+            System.out.println("There is no breakpoint at line " + lineNumber);
+            return;
+        }
+
+        virtualMachine.eventRequestManager().breakpointRequests().stream()
+                .filter(BreakpointRequest::isEnabled)
+                .filter(brk -> brk.location().lineNumber() == lineNumber)
+                .findFirst().orElseThrow().disable();
+        System.out.println("Removed the breakpoint at line " + lineNumber);
     }
 
     private static List<Integer> getActiveBreakpoints(VirtualMachine virtualMachine) {
-        final List<Integer> breakpoints = virtualMachine.eventRequestManager().breakpointRequests()
+        return virtualMachine.eventRequestManager().breakpointRequests()
                 .stream()
                 .filter(BreakpointRequest::isEnabled)
                 .map(BreakpointRequest::location)
@@ -139,7 +171,6 @@ public class Main {
                 .distinct()
                 .sorted()
                 .collect(Collectors.toList());
-        return breakpoints;
     }
 
     private static void printDetailed(Map<LocalVariable, Value> variables, String variableName) {
